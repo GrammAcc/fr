@@ -1,0 +1,64 @@
+# The directory Mix will write compiled artifacts to.
+/_build/
+
+# If you run "mix test --cover", coverage assets end up here.
+/cover/
+
+# The directory Mix downloads your dependencies sources to.
+/deps/
+
+# Where third-party dependencies like ExDoc output generated docs.
+/doc/
+
+# Ignore .fetch files in case you like to edit your project deps locally.
+/.fetch
+
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
+
+# Also ignore archive artifacts (built via "mix archive.build").
+*.ez
+
+# Ignore package tarball (built via "mix hex.build").
+fr-*.tar
+
+# Temporary files, for example, from tests.
+/tmp/
+
+
+# My ignores.
+logs
+**/*.log
+
+# Other language artifacts.
+**/*.pot
+**/*.pyc
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.venv
+**/.coverage
+**/build
+**/dist
+**/*.egg-info
+**/htmlcov
+**/.pytype
+**/node_modules
+
+# Scratch files
+**/temp.*
+**/tmp.*
+**/*.temp
+**/*.tmp
+!**/*template*
+**/*.bak
+
+# Environment files
+**/.env
+**/.env.*
+
+# Generated binary
+fr
+
+# Generated test files
+test/integration/**/input
