@@ -55,7 +55,7 @@ defmodule Fr.Cli.Prompt do
         findtag.replace
       end
 
-    IO.puts("  #{optno}) Find - #{findtag.find}, Replace - #{to_replace}")
+    IO.puts("  #{optno}) #{findtag.description}: Find - #{findtag.find}, Replace - #{to_replace}")
   end
 
   def print_artifacts([{_fp, [{%Fr.Linechange{}, _optno} | _]} | _] = artifacts) do
