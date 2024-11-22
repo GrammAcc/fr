@@ -24,6 +24,16 @@ defmodule Fr.Cli.Prompt do
       'h': Show this help message.
   """
 
+  @prompt_height 20
+
+  defp normalize_offset(offset) when is_integer(offset) do
+    if offset < 0 do
+      0
+    else
+      offset
+    end
+  end
+
   defp prompt(query) when is_binary(query) do
     IO.puts(query)
 
@@ -41,13 +51,50 @@ defmodule Fr.Cli.Prompt do
     findtag
   end
 
-  defp print_artifact({%Fr.Linechange{} = linechange, optno}) do
-    IO.puts(
-      "    |__ #{optno}) line#{linechange.lineno}:\n        '#{String.trim_trailing(linechange.old, "\n")}'\n        |\n        V\n        '#{String.trim_trailing(linechange.new, "\n")}'"
-    )
+  def print_artifacts([{_fp, [{%Fr.Linechange{}, _optno} | _]} | _] = artifacts, offset) do
+    norm_offset = normalize_offset(offset)
+
+    output_string =
+      artifacts
+      |> windowed_output(norm_offset)
+      |> Enum.join("\n")
+
+    IO.puts("\n" <> output_string <> "\n")
+
+    artifacts
   end
 
-  defp print_artifact({%Fr.Findtag{} = findtag, optno}) do
+  def print_artifacts([{%Fr.Findtag{}, _optno} | _] = artifacts, offset) do
+    norm_offset = normalize_offset(offset)
+
+    output_string =
+      artifacts
+      |> windowed_output(norm_offset)
+      |> Enum.join("\n")
+
+    IO.puts("\n" <> output_string <> "\n")
+    artifacts
+  end
+
+  def print_artifacts([], _offset) do
+    IO.puts("Nothing found")
+    []
+  end
+
+  @spec format_output({Fr.Linechange.t(), pos_integer()}) :: binary()
+  defp format_output({%Fr.Linechange{} = linechange, optno}) do
+    "    " <>
+      "|__ #{optno}) line#{linechange.lineno}:\n" <>
+      "        " <>
+      "'#{String.trim_trailing(linechange.old, "\n")}'\n" <>
+      "        |\n" <>
+      "        V\n" <>
+      "        " <>
+      "'#{String.trim_trailing(linechange.new, "\n")}'"
+  end
+
+  @spec format_output({Fr.Findtag.t(), pos_integer()}) :: binary()
+  defp format_output({%Fr.Findtag{} = findtag, optno}) do
     to_replace =
       if findtag.replace == :user_input do
         "<input>"
@@ -55,30 +102,43 @@ defmodule Fr.Cli.Prompt do
         findtag.replace
       end
 
-    IO.puts("  #{optno}) #{findtag.description}: Find - #{findtag.find}, Replace - #{to_replace}")
+    "  #{optno}) #{findtag.description}: Find - #{findtag.find}, Replace - #{to_replace}"
   end
 
-  def print_artifacts([{_fp, [{%Fr.Linechange{}, _optno} | _]} | _] = artifacts) do
-    Enum.each(artifacts, fn {filepath, linechanges} ->
-      IO.puts("\n")
-      IO.puts("  " <> filepath)
-      Enum.each(linechanges, fn artifact -> print_artifact(artifact) end)
-    end)
+  @spec offset_lines([binary()], non_neg_integer()) :: [binary()]
+  defp offset_lines(lines, offset) when is_list(lines) and is_integer(offset) do
+    cond do
+      Enum.count(lines) < @prompt_height ->
+        lines
 
-    IO.puts("\n")
+      Enum.count(lines) - offset < @prompt_height ->
+        Enum.slice(lines, Enum.count(lines) - @prompt_height, @prompt_height)
 
-    artifacts
+      true ->
+        Enum.slice(lines, offset, @prompt_height)
+    end
   end
 
-  def print_artifacts([{%Fr.Findtag{}, _optno} | _] = artifacts) do
-    IO.puts("\n")
-    Enum.each(artifacts, fn artifact -> print_artifact(artifact) end)
-    IO.puts("\n")
-    artifacts
+  @spec windowed_output([{binary(), [{Fr.Linechange.t(), pos_integer()}]}], non_neg_integer()) :: [binary()]
+  defp windowed_output([{_fp, [{%Fr.Linechange{}, _optno} | _]} | _] = artifacts, offset)
+       when is_integer(offset) do
+    artifact_lines =
+      Enum.map(artifacts, fn {filepath, linechanges} ->
+        filepath <>
+          "\n" <>
+          (Enum.map(linechanges, fn artifact -> format_output(artifact) end)
+           |> Enum.join("\n"))
+      end)
+      |> Enum.join("\n")
+      |> String.split("\n")
+
+    offset_lines(artifact_lines, offset)
   end
 
-  def print_artifacts([]) do
-    IO.puts("Nothing found")
+  @spec windowed_output([{binary(), [{Fr.Findtag.t(), pos_integer()}]}], non_neg_integer()) :: [binary()]
+  defp windowed_output([{%Fr.Findtag{}, _optno} | _] = artifacts, offset) when is_integer(offset) do
+    Enum.map(artifacts, fn artifact -> format_output(artifact) end)
+    |> offset_lines(offset)
   end
 
   defp cancel() do
@@ -102,9 +162,10 @@ defmodule Fr.Cli.Prompt do
     IO.puts("Invalid instruction #{user_input}")
   end
 
-  @spec findtag_prompt([{Fr.Findtag.t(), pos_integer()}]) :: {:ok, Fr.Findtag.t()} | {:cancelled, binary()}
-  def findtag_prompt(artifacts) do
-    print_artifacts(artifacts)
+  @spec findtag_prompt([{Fr.Findtag.t(), pos_integer()}], integer()) ::
+          {:ok, Fr.Findtag.t()} | {:cancelled, binary()}
+  def findtag_prompt(artifacts, offset) do
+    print_artifacts(artifacts, offset)
 
     user_input =
       prompt("Enter the number of the findtag you want to use. 'q' to quit, 'h' for help...")
@@ -117,17 +178,17 @@ defmodule Fr.Cli.Prompt do
 
           "h" ->
             print_help(:findtag)
-            findtag_prompt(artifacts)
+            findtag_prompt(artifacts, offset)
 
           _ ->
             input_error(user_input)
-            findtag_prompt(artifacts)
+            findtag_prompt(artifacts, offset)
         end
 
       {optno, _} ->
         if optno > length(artifacts) or optno < 1 do
           input_error(user_input)
-          findtag_prompt(artifacts)
+          findtag_prompt(artifacts, offset)
         else
           parsed_findtag =
             Fr.Proc.Findtags.select(optno)
@@ -139,11 +200,11 @@ defmodule Fr.Cli.Prompt do
     end
   end
 
-  def confirm_prompt() do
+  def confirm_prompt(offset) when is_integer(offset) do
     IO.puts("The following lines will be modified...")
 
     Fr.Proc.Linechanges.filechanges()
-    |> print_artifacts()
+    |> print_artifacts(offset)
 
     to_continue = prompt("Continue? y/N")
 
@@ -155,11 +216,11 @@ defmodule Fr.Cli.Prompt do
     end
   end
 
-  def confirm_prompt(%Fr.Findtag{} = findtag) do
+  def confirm_prompt(%Fr.Findtag{} = findtag, offset) when is_integer(offset) do
     IO.puts("The following lines will be modified...")
 
     Fr.Proc.Linechanges.filechanges()
-    |> print_artifacts()
+    |> print_artifacts(offset)
 
     to_continue = prompt("Continue? y/N")
 
@@ -171,9 +232,9 @@ defmodule Fr.Cli.Prompt do
     end
   end
 
-  def linechange_prompt() do
+  def linechange_prompt(offset) when is_integer(offset) do
     Fr.Proc.Linechanges.filechanges()
-    |> print_artifacts()
+    |> print_artifacts(offset)
 
     user_input =
       prompt(
@@ -185,32 +246,36 @@ defmodule Fr.Cli.Prompt do
     case length(split_input) do
       1 ->
         case String.downcase(user_input) do
+          "j" ->
+            linechange_prompt(offset + 1)
+
+          "k" ->
+            linechange_prompt(offset - 1)
+
           "e" ->
-            confirm_prompt()
+            confirm_prompt(0)
 
           "q" ->
             cancel()
 
           "r" ->
             Fr.Proc.Linechanges.reset()
-            linechange_prompt()
+            linechange_prompt(offset)
 
           "h" ->
             print_help(:linechange)
-            linechange_prompt()
+            linechange_prompt(offset)
         end
 
       2 ->
-        IO.puts("len was two")
-
         case Integer.parse(Enum.at(split_input, 1)) do
           {num, _} ->
             Fr.Proc.Linechanges.remove(num)
-            linechange_prompt()
+            linechange_prompt(offset)
 
           :error ->
             input_error(user_input)
-            linechange_prompt()
+            linechange_prompt(offset)
         end
 
       3 ->
@@ -218,18 +283,18 @@ defmodule Fr.Cli.Prompt do
         {open, _} = Integer.parse(open)
         {close, _} = Integer.parse(close)
         Fr.Proc.Linechanges.remove(open..close)
-        linechange_prompt()
+        linechange_prompt(offset)
 
       _ ->
         input_error(user_input)
-        linechange_prompt()
+        linechange_prompt(offset)
     end
   end
 
   @spec linechange_prompt(Fr.Findtag.t()) :: :ok | :cancelled
-  def linechange_prompt(%Fr.Findtag{} = findtag) do
+  def linechange_prompt(%Fr.Findtag{} = findtag, offset) when is_integer(offset) do
     Fr.Proc.Linechanges.filechanges()
-    |> print_artifacts()
+    |> print_artifacts(offset)
 
     user_input =
       prompt(
@@ -241,32 +306,36 @@ defmodule Fr.Cli.Prompt do
     case length(split_input) do
       1 ->
         case String.downcase(user_input) do
+          "j" ->
+            linechange_prompt(findtag, offset + 1)
+
+          "k" ->
+            linechange_prompt(findtag, offset - 1)
+
           "e" ->
-            confirm_prompt(findtag)
+            confirm_prompt(findtag, offset)
 
           "q" ->
             cancel()
 
           "r" ->
             Fr.Proc.Linechanges.reset()
-            linechange_prompt(findtag)
+            linechange_prompt(findtag, offset)
 
           "h" ->
             print_help(:linechange)
-            linechange_prompt(findtag)
+            linechange_prompt(findtag, offset)
         end
 
       2 ->
-        IO.puts("len was two")
-
         case Integer.parse(Enum.at(split_input, 1)) do
           {num, _} ->
             Fr.Proc.Linechanges.remove(num)
-            linechange_prompt(findtag)
+            linechange_prompt(findtag, offset)
 
           :error ->
             input_error(user_input)
-            linechange_prompt(findtag)
+            linechange_prompt(findtag, offset)
         end
 
       3 ->
@@ -274,11 +343,11 @@ defmodule Fr.Cli.Prompt do
         {open, _} = Integer.parse(open)
         {close, _} = Integer.parse(close)
         Fr.Proc.Linechanges.remove(open..close)
-        linechange_prompt(findtag)
+        linechange_prompt(findtag, offset)
 
       _ ->
         input_error(user_input)
-        linechange_prompt(findtag)
+        linechange_prompt(findtag, offset)
     end
   end
 end

@@ -184,20 +184,20 @@ defmodule Fr.Cli do
           break(0, "Nothing found")
 
         artifacts ->
-          Prompt.print_artifacts(artifacts)
+          Prompt.print_artifacts(artifacts, 0)
           break(1)
       end
     end
 
     if notnil(find) and notnil(replace) do
       Fr.Proc.Linechanges.collect(filepaths, find, replace)
-      Prompt.linechange_prompt()
+      Prompt.linechange_prompt(0)
     else
       with {:ok, findtag} <-
              Fr.Proc.Findtags.collect(filepaths)
-             |> Prompt.findtag_prompt() do
+             |> Prompt.findtag_prompt(0) do
         Fr.Proc.Linechanges.collect(filepaths, findtag)
-        Prompt.linechange_prompt(findtag)
+        Prompt.linechange_prompt(findtag, 0)
       end
     end
   end
