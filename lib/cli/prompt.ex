@@ -59,26 +59,28 @@ defmodule Fr.Cli.Prompt do
   end
 
   def print_artifacts([{_fp, [{%Fr.Linechange{}, _optno} | _]} | _] = artifacts) do
+    IO.puts("")
+
     Enum.each(artifacts, fn {filepath, linechanges} ->
-      IO.puts("\n")
       IO.puts("  " <> filepath)
       Enum.each(linechanges, fn artifact -> print_artifact(artifact) end)
     end)
 
-    IO.puts("\n")
+    IO.puts("")
 
     artifacts
   end
 
   def print_artifacts([{%Fr.Findtag{}, _optno} | _] = artifacts) do
-    IO.puts("\n")
+    IO.puts("")
     Enum.each(artifacts, fn artifact -> print_artifact(artifact) end)
-    IO.puts("\n")
+    IO.puts("")
     artifacts
   end
 
   def print_artifacts([]) do
     IO.puts("Nothing found")
+    []
   end
 
   defp cancel() do
@@ -99,7 +101,7 @@ defmodule Fr.Cli.Prompt do
   end
 
   defp input_error(user_input) when is_binary(user_input) do
-    IO.puts("Invalid instruction #{user_input}")
+    IO.puts("Invalid instruction #{user_input}. Try 'h'")
   end
 
   @spec findtag_prompt([{Fr.Findtag.t(), pos_integer()}]) :: {:ok, Fr.Findtag.t()} | {:cancelled, binary()}
@@ -198,11 +200,13 @@ defmodule Fr.Cli.Prompt do
           "h" ->
             print_help(:linechange)
             linechange_prompt()
+
+          _ ->
+            input_error(user_input)
+            linechange_prompt()
         end
 
       2 ->
-        IO.puts("len was two")
-
         case Integer.parse(Enum.at(split_input, 1)) do
           {num, _} ->
             Fr.Proc.Linechanges.remove(num)
@@ -254,11 +258,13 @@ defmodule Fr.Cli.Prompt do
           "h" ->
             print_help(:linechange)
             linechange_prompt(findtag)
+
+          _ ->
+            input_error(user_input)
+            linechange_prompt(findtag)
         end
 
       2 ->
-        IO.puts("len was two")
-
         case Integer.parse(Enum.at(split_input, 1)) do
           {num, _} ->
             Fr.Proc.Linechanges.remove(num)
