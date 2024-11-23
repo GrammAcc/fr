@@ -48,7 +48,7 @@ defmodule Fr.Cli do
 
   alias Fr.Cli.Prompt
 
-  @version "fr v0.1.0 - elixir: #{System.version()}, otp: #{System.otp_release()}"
+  @version "fr v#{Fr.MixProject.version()} - elixir: #{System.version()}, otp: #{System.otp_release()}"
 
   defmodule Argv do
     @moduledoc false
