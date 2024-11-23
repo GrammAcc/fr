@@ -15,17 +15,54 @@ defmodule Fr do
     |> String.split("::")
   end
 
-  @spec collect_filepaths(Path.t(), [String.t()], nil) :: [binary()]
-  def collect_filepaths(root_dir, extensions, nil) do
+  defp parse_filepaths(dir_path, [_ | _] = extensions) do
     Enum.flat_map(extensions, fn ft ->
-      Path.wildcard(root_dir <> "/**/*." <> ft, match_dot: true)
+      Path.wildcard(dir_path <> "/**/*." <> ft, match_dot: true)
     end)
   end
 
-  @spec collect_filepaths(Path.t(), [String.t()], [String.t()]) :: [binary()]
-  def collect_filepaths(root_dir, extensions, [_ | _] = extra_files) do
-    Enum.flat_map(extensions, fn ft ->
-      Path.wildcard(root_dir <> "/**/*." <> ft, match_dot: true)
-    end) ++ extra_files
+  defp parse_paths([_ | _] = paths, [_ | _] = extensions) do
+    paths
+    |> Enum.flat_map(fn path ->
+      if File.dir?(path) do
+        parse_filepaths(path, extensions)
+      else
+        [path]
+      end
+    end)
+  end
+
+  defp include_paths(filepaths, nil, _extensions) when is_list(filepaths), do: filepaths
+
+  defp include_paths(filepaths, [_ | _] = include, [_ | _] = extensions) when is_list(filepaths) do
+    filepaths ++ parse_paths(include, extensions)
+  end
+
+  defp exclude_paths([_ | _] = filepaths, [_ | _] = exclude) do
+    filepaths
+    |> Enum.filter(fn path ->
+      Enum.all?(exclude, fn to_exclude -> path != to_exclude end)
+    end)
+  end
+
+  defp exclude_paths(filepaths, nil) when is_list(filepaths), do: filepaths
+
+  defp check_filepaths([]), do: []
+
+  defp check_filepaths([_ | _] = filepaths) do
+    errors = Enum.filter(filepaths, fn path -> !File.exists?(path) end)
+
+    case errors do
+      [] -> {:ok, filepaths}
+      _ -> {:error, Enum.map(errors, fn path -> "Error: file '#{path}' does not exist." end)}
+    end
+  end
+
+  @spec collect_filepaths(Path.t(), [String.t()], [String.t()] | nil, [String.t()] | nil) :: [binary()]
+  def collect_filepaths(root_dir, extensions, include, exclude) do
+    parse_filepaths(root_dir, extensions)
+    |> include_paths(include, extensions)
+    |> exclude_paths(exclude)
+    |> check_filepaths()
   end
 end

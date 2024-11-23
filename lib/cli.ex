@@ -4,9 +4,9 @@ defmodule Fr.Cli do
 
   usage examples:
     fr -e | --extensions <comma,separated> [<root_dir>]
-    fr -e | --extensions <comma,separated> [-x | --extra-files <comma,separated>] [<root_dir>]
+    fr -e | --extensions <comma,separated> [-i | --include <comma,separated>] [-x | --exclude <comma,separated>] [<root_dir>]
     fr -e | --extensions <comma,separated> [-f | --find <string> -r | --replace <string>] [<root_dir>]
-    fr -e | --extensions <comma,separated> [-x | --extra-files <comma,separated>] [--check] [<root_dir>]
+    fr -e | --extensions <comma,separated> [--check] [<root_dir>]
     fr -h | --help
 
     positional args:
@@ -17,15 +17,27 @@ defmodule Fr.Cli do
     required switches:
       -e | --extensions:
         Comma-separated list of file extensions to search.
+
         Example: -e ex,py,json
 
     optional switches:
-      -x | --extra-files:
-        Comma-separated list of additional filenames to include in the search.
-        This list is matched exactly, so it can be used to match files that do not
+      -i | --include:
+        Comma-separated list of additional file or directory names to include in the search.
+        Matches file or directories exactly, so it can be used to match files that do not
         use an extension, or to include specific files that use a different extension
-        than specified with the -e option.
-        Example: -x Caddyfile,Dockerfile
+        than specified with the -e switch.
+
+        Including a directory will include all files under that directory with extensions
+        matching those specified by the -e switch.
+
+        Example: -i Caddyfile,Dockerfile,submodule/src
+
+      -x | --exclude:
+        Comma-separated list of file and directory names to exclude from the search.
+        Matches file or directories at any level of nesting in the search path, so this
+        is equivalent to the glob pattern: `!**/name`.
+
+        Example: -x deps,node_modules,.venv,submodule/docs
 
       -f | --find:
         String to search for. If provided, then findtags are not searched.
@@ -82,7 +94,7 @@ defmodule Fr.Cli do
     if File.dir?(expanded) do
       %Argv{argv | args: %{argv.args | root_dir: expanded}}
     else
-      break(1, "#{argv.args.root_dir} is not a directory")
+      break(1, "Error: '#{argv.args.root_dir}' is not a directory")
     end
   end
 
@@ -144,10 +156,11 @@ defmodule Fr.Cli do
   def main(argv) do
     parsed_argv =
       OptionParser.parse!(argv,
-        aliases: [e: :extensions, x: :extra_files, f: :find, r: :replace, h: :help, v: :version],
+        aliases: [e: :extensions, i: :include, x: :exclude, f: :find, r: :replace, h: :help, v: :version],
         strict: [
           extensions: :string,
-          extra_files: :string,
+          include: :string,
+          exclude: :string,
           find: :string,
           replace: :string,
           check: :boolean,
@@ -161,44 +174,52 @@ defmodule Fr.Cli do
       |> validate_root_dir()
       |> parse_required(:extensions)
       |> parse_to_list(:extensions)
-      |> parse_optional(:extra_files)
-      |> parse_to_list(:extra_files)
+      |> parse_optional(:include)
+      |> parse_to_list(:include)
+      |> parse_optional(:exclude)
+      |> parse_to_list(:exclude)
       |> parse_optional(:find)
       |> parse_optional(:replace)
       |> parse_optional(:check)
 
     root_dir = parsed_argv.args.root_dir
     extensions = parsed_argv.options.extensions
-    extra_files = parsed_argv.options.extra_files
+    include = parsed_argv.options.include
+    exclude = parsed_argv.options.exclude
     find = parsed_argv.options.find
     replace = parsed_argv.options.replace
     check = parsed_argv.options.check
 
-    filepaths = Fr.collect_filepaths(root_dir, extensions, extra_files)
+    case Fr.collect_filepaths(root_dir, extensions, include, exclude) do
+      {:error, msgs} ->
+        err_msg = Enum.reduce(msgs, fn msg, acc -> acc <> "\n" <> msg end)
+        break(1, err_msg)
 
-    if notnil(check) do
-      Fr.Proc.Findtags.collect(filepaths)
+      {:ok, filepaths} ->
+        if notnil(check) do
+          Fr.Proc.Findtags.collect(filepaths)
 
-      case Fr.Proc.Findtags.artifacts() do
-        [] ->
-          break(0, "Nothing found")
+          case Fr.Proc.Findtags.artifacts() do
+            [] ->
+              break(0, "Nothing found")
 
-        artifacts ->
-          Prompt.print_artifacts(artifacts)
-          break(1)
-      end
-    end
+            artifacts ->
+              Prompt.print_artifacts(artifacts)
+              break(1)
+          end
+        end
 
-    if notnil(find) and notnil(replace) do
-      Fr.Proc.Linechanges.collect(filepaths, find, replace)
-      Prompt.linechange_prompt()
-    else
-      with {:ok, findtag} <-
-             Fr.Proc.Findtags.collect(filepaths)
-             |> Prompt.findtag_prompt() do
-        Fr.Proc.Linechanges.collect(filepaths, findtag)
-        Prompt.linechange_prompt(findtag)
-      end
+        if notnil(find) and notnil(replace) do
+          Fr.Proc.Linechanges.collect(filepaths, find, replace)
+          Prompt.linechange_prompt()
+        else
+          with {:ok, findtag} <-
+                 Fr.Proc.Findtags.collect(filepaths)
+                 |> Prompt.findtag_prompt() do
+            Fr.Proc.Linechanges.collect(filepaths, findtag)
+            Prompt.linechange_prompt(findtag)
+          end
+        end
     end
   end
 end
