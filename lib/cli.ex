@@ -3,15 +3,17 @@ defmodule Fr.Cli do
   Find/replace for busy people
 
   usage examples:
-    fr -e | --extensions <comma,separated> [<root_dir>]
-    fr -e | --extensions <comma,separated> [-i | --include <comma,separated>] [-x | --exclude <comma,separated>] [<root_dir>]
-    fr -e | --extensions <comma,separated> [-f | --find <string> -r | --replace <string>] [<root_dir>]
-    fr -e | --extensions <comma,separated> [--check] [<root_dir>]
+    fr -e | --extensions <comma,separated> [<root_dir>...]
+    fr -e | --extensions <comma,separated> [-i | --include <comma,separated>] [-x | --exclude <comma,separated>] [<root_dir>...]
+    fr -e | --extensions <comma,separated> [-f | --find <string> -r | --replace <string>] [<root_dir>...]
+    fr -e | --extensions <comma,separated> [--check] [<root_dir>...]
+    fr -v | --version
     fr -h | --help
 
     positional args:
       root_dir:
-      The top directory to search within. No files above this directory will be changed.
+      Top level directory to search within. No files above this directory will be changed.
+      Can be specified multiple times to search within multiple directories.
       Defaults to $PWD if not provided.
 
     required switches:
@@ -22,22 +24,38 @@ defmodule Fr.Cli do
 
     optional switches:
       -i | --include:
-        Comma-separated list of additional file or directory names to include in the search.
-        Matches file or directories exactly, so it can be used to match files that do not
-        use an extension, or to include specific files that use a different extension
-        than specified with the -e switch.
+        Comma-separated list of additional files to include in the search.
 
-        Including a directory will include all files under that directory with extensions
-        matching those specified by the -e switch.
+        This can be used to match files that do not use an extension, or to include specific
+        files that use a different extension than was specified with the -e switch.
 
-        Example: -i Caddyfile,Dockerfile,submodule/src
+        Supports basic globbing patterns such as 'src/*.py' and '**/*.spec'. However, the
+        globbing semantics are handled by Elixir, so the shell's globbing settings will not
+        be respected. Dotfiles are included as if `shopt -s dotglob` was set in bash, but special
+        files `.` and `..` are not included. See: https://hexdocs.pm/elixir/Path.html#wildcard/2 for
+        all globbing semantics.
+
+        The argument must be wrapped in quotes if it contains a glob pattern.
+        E.g. fr -x '.env,scripts/*.ex', not fr -x .env,scripts/*.ex
+
+        Including directories is not supported as it is ambiguous which files inside the directory should
+        be included. If you need to search within more than one directory, pass the <root_dir> positional
+        argument multiple times.
+
+        Example: -i 'Caddyfile,Dockerfile,submodule/src/*,**/.env'
 
       -x | --exclude:
         Comma-separated list of file and directory names to exclude from the search.
-        Matches file or directories at any level of nesting in the search path, so this
-        is equivalent to the glob pattern: `!**/name`.
 
-        Example: -x deps,node_modules,.venv,submodule/docs
+        This can be used to exclude vendor and deps directories or to exclude specific
+        files or directories that would otherwise be matched based on the -e switch that
+        was provided.
+
+        Supports the same globbing patterns as the -i switch, but also excludes directory
+        contents recursively since the meaning of excluding a directory is unambiguous.
+        The quoting rules are the same as the -i switch as well.
+
+        Example: -x 'deps,node_modules,.venv,**/docs'
 
       -f | --find:
         String to search for. If provided, then findtags are not searched.
@@ -53,6 +71,9 @@ defmodule Fr.Cli do
         Returns exit code 0 if no findtags are found, else 1.
         This can be used in a CI workflow to ensure no findtags are left in
         the source code.
+
+      -v | --version:
+        List version information and exit.
 
       -h | --help:
         Show this message and exit.
@@ -79,8 +100,8 @@ defmodule Fr.Cli do
     break(status)
   end
 
-  defp parse_argv({options, [root_dir]}) do
-    %Argv{options: Enum.into(options, %{}), args: %{root_dir: root_dir}}
+  defp parse_argv({options, [_ | _] = root_dirs}) do
+    %Argv{options: Enum.into(options, %{}), args: %{root_dirs: root_dirs}}
   end
 
   defp parse_argv({options, []}) do
@@ -88,13 +109,19 @@ defmodule Fr.Cli do
     %Argv{options: Enum.into(options, %{}), args: %{root_dir: root_dir}}
   end
 
-  defp validate_root_dir(%Argv{} = argv) do
-    expanded = Path.expand(argv.args.root_dir)
+  defp validate_root_dirs(%Argv{} = argv) do
+    expanded_dirs = Enum.map(argv.args.root_dirs, fn root_dir -> Path.expand(root_dir) end)
 
-    if File.dir?(expanded) do
-      %Argv{argv | args: %{argv.args | root_dir: expanded}}
+    if Enum.all?(expanded_dirs, fn expanded_dir -> File.dir?(expanded_dir) end) do
+      %Argv{argv | args: %{argv.args | root_dirs: expanded_dirs}}
     else
-      break(1, "Error: '#{argv.args.root_dir}' is not a directory")
+      errs =
+        expanded_dirs
+        |> Enum.filter(fn expanded_dir -> !File.dir?(expanded_dir) end)
+        |> Enum.map(fn err_dir -> "Error: '#{err_dir}' is not a directory" end)
+        |> Enum.join("\n")
+
+      break(1, errs)
     end
   end
 
@@ -171,7 +198,7 @@ defmodule Fr.Cli do
       |> parse_argv()
       |> parse_help()
       |> parse_version()
-      |> validate_root_dir()
+      |> validate_root_dirs()
       |> parse_required(:extensions)
       |> parse_to_list(:extensions)
       |> parse_optional(:include)
@@ -182,7 +209,7 @@ defmodule Fr.Cli do
       |> parse_optional(:replace)
       |> parse_optional(:check)
 
-    root_dir = parsed_argv.args.root_dir
+    root_dirs = parsed_argv.args.root_dirs
     extensions = parsed_argv.options.extensions
     include = parsed_argv.options.include
     exclude = parsed_argv.options.exclude
@@ -190,7 +217,7 @@ defmodule Fr.Cli do
     replace = parsed_argv.options.replace
     check = parsed_argv.options.check
 
-    case Fr.collect_filepaths(root_dir, extensions, include, exclude) do
+    case Fr.collect_filepaths(root_dirs, extensions, include, exclude) do
       {:error, msgs} ->
         err_msg = Enum.reduce(msgs, fn msg, acc -> acc <> "\n" <> msg end)
         break(1, err_msg)

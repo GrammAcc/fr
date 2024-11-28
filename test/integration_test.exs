@@ -26,7 +26,7 @@ defmodule Fr.Test.Integration do
   test "tempfiles are cleaned up" do
     root_dir = "test/integration/basic_usage"
     seed_files(root_dir)
-    {:ok, filepaths} = Fr.collect_filepaths(root_dir <> "/input", ["ts", "json"], nil, nil)
+    {:ok, filepaths} = Fr.collect_filepaths([root_dir <> "/input"], ["ts", "json"], nil, nil)
 
     filepaths
     |> Fr.Proc.Findtags.collect()
@@ -49,7 +49,7 @@ defmodule Fr.Test.Integration do
     test "basic_usage" do
       root_dir = "test/integration/basic_usage"
       seed_files(root_dir)
-      {:ok, filepaths} = Fr.collect_filepaths(root_dir <> "/input", ["ts", "json"], nil, nil)
+      {:ok, filepaths} = Fr.collect_filepaths([root_dir <> "/input"], ["ts", "json"], nil, nil)
 
       filepaths
       |> Fr.Proc.Findtags.collect()
@@ -70,7 +70,7 @@ defmodule Fr.Test.Integration do
       root_dir = "test/integration/comment_relative_location/above_line"
       seed_files(root_dir)
 
-      {:ok, filepaths} = Fr.collect_filepaths(root_dir <> "/input", ["ex"], nil, nil)
+      {:ok, filepaths} = Fr.collect_filepaths([root_dir <> "/input"], ["ex"], nil, nil)
 
       filepaths
       |> Fr.Proc.Findtags.collect()
@@ -90,7 +90,7 @@ defmodule Fr.Test.Integration do
       root_dir = "test/integration/comment_relative_location/below_line"
       seed_files(root_dir)
 
-      {:ok, filepaths} = Fr.collect_filepaths(root_dir <> "/input", ["ex"], nil, nil)
+      {:ok, filepaths} = Fr.collect_filepaths([root_dir <> "/input"], ["ex"], nil, nil)
 
       filepaths
       |> Fr.Proc.Findtags.collect()
@@ -108,63 +108,119 @@ defmodule Fr.Test.Integration do
   end
 
   describe "collect_filepaths" do
-    @root_dir "test/integration/collect_filepaths/ts"
+    @root_dir "test/integration/collect_filepaths"
+    @ts_dir @root_dir <> "/ts"
+    @expanded_ts_dir quote(do: Path.expand(@ts_dir))
+    @ex_dir @root_dir <> "/ex"
+    @expanded_ex_dir quote(do: Path.expand(@ex_dir))
     @extensions ["ts", "ex"]
 
     test "no-extra-flags" do
-      filepaths = Fr.collect_filepaths(@root_dir, @extensions, nil, nil)
-      expected = {:ok, [@root_dir <> "/one.ts", @root_dir <> "/two.ts"]}
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, nil, nil)
+      expected = {:ok, [expanded_ts_dir <> "/one.ts", expanded_ts_dir <> "/two.ts"]}
+      assert filepaths == expected
+    end
+
+    test "multiple-ts_dirs" do
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      filepaths = Fr.collect_filepaths([@ts_dir, @ex_dir], @extensions, nil, nil)
+
+      expected =
+        {:ok, [expanded_ts_dir <> "/one.ts", expanded_ts_dir <> "/two.ts", Path.expand(@ex_dir) <> "/one.ex"]}
+
       assert filepaths == expected
     end
 
     test "with-include" do
-      filepaths = Fr.collect_filepaths(@root_dir, @extensions, [".gitignore"], nil)
-      expected = {:ok, [@root_dir <> "/one.ts", @root_dir <> "/two.ts", ".gitignore"]}
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, [".gitignore"], nil)
+
+      expected =
+        {:ok, [expanded_ts_dir <> "/one.ts", expanded_ts_dir <> "/two.ts", Path.expand(".gitignore")]}
+
       assert filepaths == expected
     end
 
     test "include-non-existent-file-returns-error" do
-      filepaths = Fr.collect_filepaths(@root_dir, @extensions, ["one.json"], nil)
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, ["one.json"], nil)
       expected = {:error, ["Error: file 'one.json' does not exist."]}
       assert filepaths == expected
     end
 
     test "include-matches-exact-path" do
-      filepaths = Fr.collect_filepaths(@root_dir, @extensions, [@root_dir <> "/one.json"], nil)
-      expected = {:ok, [@root_dir <> "/one.ts", @root_dir <> "/two.ts", @root_dir <> "/one.json"]}
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, [@ts_dir <> "/one.json"], nil)
+
+      expected =
+        {:ok, [expanded_ts_dir <> "/one.ts", expanded_ts_dir <> "/two.ts", expanded_ts_dir <> "/one.json"]}
+
       assert filepaths == expected
     end
 
-    test "include-dir-uses-extensions" do
-      ex_dir = "test/integration/collect_filepaths/ex"
-
-      filepaths = Fr.collect_filepaths(@root_dir, @extensions, [ex_dir], nil)
-      expected = {:ok, [@root_dir <> "/one.ts", @root_dir <> "/two.ts", ex_dir <> "/one.ex"]}
+    test "include-dir-causes-err" do
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, [@ex_dir], nil)
+      expected = {:error, ["Error: Invalid value for '--include'. #{@ex_dir} is a directory."]}
       assert filepaths == expected
+    end
+
+    test "include-glob" do
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      included = @root_dir <> "/**/*.ex"
+
+      {:ok, filepaths} = Fr.collect_filepaths([@ts_dir], @extensions, [included], nil)
+
+      expected_paths = [
+        expanded_ts_dir <> "/one.ts",
+        expanded_ts_dir <> "/two.ts",
+        Path.expand(@ex_dir) <> "/one.ex"
+      ]
+
+      assert filepaths == expected_paths
     end
 
     test "with-exclude" do
-      filepaths = Fr.collect_filepaths(@root_dir, @extensions, nil, [@root_dir <> "/two.ts"])
-      expected = {:ok, [@root_dir <> "/one.ts"]}
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, nil, [@ts_dir <> "/two.ts"])
+      expected = {:ok, [expanded_ts_dir <> "/one.ts"]}
       assert filepaths == expected
     end
 
-    test "exclude-matches-exact-path" do
-      filepaths = Fr.collect_filepaths(@root_dir, @extensions, nil, ["two.ts"])
-      expected = {:ok, [@root_dir <> "/one.ts", @root_dir <> "/two.ts"]}
+    test "exclude-non-existent-file-returns-error" do
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, nil, ["two.ts"])
+      expected = {:error, ["Error: file 'two.ts' does not exist."]}
+      assert filepaths == expected
+    end
+
+    test "exclude-glob" do
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, nil, ["**/two.ts"])
+      expected = {:ok, [expanded_ts_dir <> "/one.ts"]}
+      assert filepaths == expected
+    end
+
+    test "exclude-dir" do
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      filepaths = Fr.collect_filepaths([@root_dir], ["ts", "ex", "json"], nil, [@ex_dir])
+
+      expected =
+        {:ok, [expanded_ts_dir <> "/one.ts", expanded_ts_dir <> "/two.ts", expanded_ts_dir <> "/one.json"]}
+
       assert filepaths == expected
     end
 
     test "with-include-and-exclude" do
-      filepaths = Fr.collect_filepaths(@root_dir, @extensions, [".gitignore"], [@root_dir <> "/two.ts"])
-      expected = {:ok, [@root_dir <> "/one.ts", ".gitignore"]}
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, [".gitignore"], [@ts_dir <> "/two.ts"])
+      expected = {:ok, [expanded_ts_dir <> "/one.ts", Path.expand(".gitignore")]}
       assert filepaths == expected
     end
 
     test "with-include-and-exclude-exclude-takes-priority" do
-      incl_excl = [@root_dir <> "/two.ts"]
-      filepaths = Fr.collect_filepaths(@root_dir, @extensions, incl_excl, incl_excl)
-      expected = {:ok, [@root_dir <> "/one.ts"]}
+      expanded_ts_dir = unquote(@expanded_ts_dir)
+      incl_excl = [@ts_dir <> "/two.ts"]
+      filepaths = Fr.collect_filepaths([@ts_dir], @extensions, incl_excl, incl_excl)
+      expected = {:ok, [expanded_ts_dir <> "/one.ts"]}
       assert filepaths == expected
     end
   end
